@@ -1,89 +1,87 @@
-import express from 'express';
-import axios from 'axios';
-import bodyParser from 'body-parser';
-import dotenv from 'dotenv';
-dotenv.config();
+const express = require('express');
+const axios = require('axios');
+const bodyParser = require('body-parser');
+require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+const port = process.env.PORT || 10000;
 
 app.use(bodyParser.json());
 
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
-const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
-
-app.get('/', (req, res) => {
-  res.send('✅ Webhook server is running!');
-});
-
 // Webhook verification
 app.get('/webhook', (req, res) => {
+  const verifyToken = process.env.VERIFY_TOKEN;
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode && token === VERIFY_TOKEN) {
-    console.log('WEBHOOK_VERIFIED');
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
+  if (mode && token) {
+    if (mode === 'subscribe' && token === verifyToken) {
+      console.log('WEBHOOK_VERIFIED');
+      res.status(200).send(challenge);
+    } else {
+      res.sendStatus(403);
+    }
   }
 });
 
-// Message handling
+// Receive message
 app.post('/webhook', async (req, res) => {
   try {
-    const entry = req.body.entry?.[0];
-    const change = entry?.changes?.[0];
-    const message = change?.value?.messages?.[0];
+    const body = req.body;
+    if (body.object) {
+      const entry = body.entry?.[0];
+      const change = entry?.changes?.[0];
+      const message = change?.value?.messages?.[0];
 
-    if (message && message.text) {
-      const sender = message.from;
-      const text = message.text.body?.toLowerCase() || '';
+      if (message) {
+        const from = message.from;
+        const msgBody = message.text?.body;
 
-      const responseMessage = 
+        console.log(`📨 Message from ${from}: ${msgBody}`);
+
+        // Send a menu back
+        const responseMsg = 
 `Welcome to Mochitochi Laundry Services! 🧺
 
 Here’s our service menu:
 
-👕 Shirts – ₹15 per piece  
+👕 Shirts – ₹15/piece  
 Professional washing & ironing
 
-👖 Pants – ₹20 per piece  
+👖 Pants – ₹20/piece  
 Deep cleaning & perfect pressing
 
-👗 Sarees – ₹100 per piece  
+👗 Sarees – ₹100/piece  
 Gentle dry cleaning & folding
 
-🧥 Suits – ₹250 per set  
-Premium dry cleaning & finishing
+🧥 Suits – ₹250/set  
+Premium dry cleaning for formalwear`;
 
-🕙 Service hours: 9 AM – 8 PM
-📍 Pickup & Delivery Available!
-📞 Contact: +91 90433 31484`;
+        await axios.post(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+          messaging_product: 'whatsapp',
+          to: from,
+          text: { body: responseMsg }
+        }, {
+          headers: {
+            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        });
 
-      await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
-        messaging_product: 'whatsapp',
-        to: sender,
-        text: { body: responseMessage },
-      }, {
-        headers: {
-          Authorization: `Bearer ${ACCESS_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      console.log(`📨 Message from ${sender}: ${text}`);
+        res.sendStatus(200);
+      } else {
+        res.sendStatus(404);
+      }
+    } else {
+      res.sendStatus(404);
     }
-
-    res.sendStatus(200);
   } catch (error) {
     console.error('❌ Error handling message:', error.message);
-    res.sendStatus(500);
+    res.sendStatus(400);
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Webhook server is running at http://localhost:${PORT}`);
+app.listen(port, () => {
+  console.log(`✅ Webhook server is running at http://localhost:${port}`);
 });
