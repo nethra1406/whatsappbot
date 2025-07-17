@@ -5,12 +5,13 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-
-// ⛔️ Replace with your actual credentials
+// 🔐 Replace with actual credentials or use environment variables
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 
+// ✅ Verified sender number (with country code)
+const VERIFIED_NUMBER = '919043331484';
 
 app.use(bodyParser.json());
 
@@ -40,6 +41,12 @@ app.post('/webhook', async (req, res) => {
 
         if (sender && text) {
             console.log(`📨 Message from ${sender}: ${text}`);
+
+            // ✅ Only respond to the verified number
+            if (sender !== VERIFIED_NUMBER) {
+                console.log(`⛔ Ignored message from unverified number: ${sender}`);
+                return res.sendStatus(200);
+            }
 
             const userText = text.trim().toLowerCase();
             let reply;
