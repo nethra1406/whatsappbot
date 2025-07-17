@@ -3,12 +3,14 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+
 
 // ⛔️ Replace with your actual credentials
-const VERIFY_TOKEN = 'my_verify_token';
-const ACCESS_TOKEN = 'EAAb3dkK6rEMBPK7OZCnTYPmRytMjcmIdEaDh5iZCWt7tXZBKkMwGy7FR0Wd4cZCNmUVZASkMWHP1IY76se0tMe8WQvcaxZBeAZBvXpPh55kW0ij1cTZCLxmQxiNWcdhLvOn3MnKeFHw2SDfYSTDJIVsMWf1cu5cTvNouMadJriYLpQizk7IoN0Dk7oBIZBXOaLRKRZADyvLCEYTBS6QEHifQJhoFhZCP64SMfzuMqX2PHZA99STHMZAxDH7UvCjyaOhEZAFwAZD';
-const PHONE_NUMBER_ID = '691877774000094';
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+
 
 app.use(bodyParser.json());
 
