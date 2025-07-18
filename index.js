@@ -1,8 +1,8 @@
 require('dotenv').config();
-
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
+const { saveOrder } = require('./db'); // <-- MongoDB helper
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -11,7 +11,6 @@ app.use(bodyParser.json());
 
 const sessions = {}; // In-memory session store
 
-// ✅ Add verified numbers here (in E.164 format - WhatsApp format, i.e., without '+' sign)
 const verifiedNumbers = [
   '919916814517',
   '919043331484',
@@ -20,37 +19,30 @@ const verifiedNumbers = [
   '918072462490'
 ];
 
-// ✅ Webhook verification (Meta callback)
+// ✅ Webhook verification
 app.get('/webhook', (req, res) => {
-  const verifyToken = process.env.VERIFY_TOKEN;
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode && token) {
-    if (mode === 'subscribe' && token === verifyToken) {
-      console.log('✅ WEBHOOK_VERIFIED');
-      res.status(200).send(challenge);
-    } else {
-      res.sendStatus(403);
-    }
+  if (mode && token && mode === 'subscribe' && token === process.env.VERIFY_TOKEN) {
+    console.log('✅ WEBHOOK_VERIFIED');
+    return res.status(200).send(challenge);
   }
+  res.sendStatus(403);
 });
 
-// ✅ Incoming WhatsApp messages
+// ✅ Incoming messages
 app.post('/webhook', async (req, res) => {
   try {
-    const body = req.body;
-    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-
+    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!message) return res.sendStatus(404);
 
     const from = message.from;
     const msgBody = message.text?.body?.trim();
 
-    // 🚫 Block unverified numbers
     if (!verifiedNumbers.includes(from)) {
-      await sendText(from, '⚠️ Sorry, this service is currently only available to verified users.');
+      await sendText(from, '⚠️ Sorry, this service is only for verified users.');
       return res.sendStatus(200);
     }
 
@@ -70,10 +62,10 @@ app.post('/webhook', async (req, res) => {
           const item = parseItem(msgBody);
           if (item) {
             session.cart.push(item);
-            await sendText(from, `✅ Added to cart: ${item.name} x ${item.qty}`);
-            await sendText(from, `🛒 Type another item or "done" to finish.`);
+            await sendText(from, `✅ Added: ${item.name} x ${item.qty}`);
+            await sendText(from, `🛒 Add more or type "done" when finished.`);
           } else {
-            await sendText(from, '⚠️ Invalid format. Use "Item x Quantity", e.g. "Shirt x 2"');
+            await sendText(from, '⚠️ Invalid. Use "Item x Quantity", e.g. "Shirt x 2"');
           }
         }
         break;
@@ -87,7 +79,7 @@ app.post('/webhook', async (req, res) => {
       case 'get_address':
         session.userInfo.address = msgBody;
         session.step = 'get_payment';
-        await sendText(from, '💳 Choose payment method: Cash / UPI / Card');
+        await sendText(from, '💳 Choose payment: Cash / UPI / Card');
         break;
 
       case 'get_payment':
@@ -98,37 +90,37 @@ app.post('/webhook', async (req, res) => {
 
       case 'confirm_order':
         if (msgBody.toLowerCase() === 'place order') {
-          await sendText(from, '🎉 Your order has been placed! Thank you!');
-          console.log('🧾 Final Order:', session);
+          await saveOrder({ phone: from, ...session }); // 🧠 Save to DB
+          await sendText(from, '🎉 Order placed! Thank you!');
+          console.log('🧾 Order saved:', session);
           delete sessions[from];
         } else {
-          await sendText(from, '❓ Please type "Place Order" to confirm.');
+          await sendText(from, '❓ Type "Place Order" to confirm.');
         }
         break;
 
       default:
-        await sendText(from, 'Hi! Type anything to see our laundry menu!');
+        await sendText(from, 'Hi! Type anything to view our laundry menu.');
         session.step = 'catalog';
-        break;
     }
 
     sessions[from] = session;
     res.sendStatus(200);
 
-  } catch (error) {
-    console.error('❌ Error handling message:', error.response?.data || error.message);
-    res.sendStatus(400);
+  } catch (err) {
+    console.error('❌ Error:', err.message || err);
+    res.sendStatus(500);
   }
 });
 
-// ✅ Server listener
+// ✅ Start server
 app.listen(port, () => {
-  console.log(`✅ Webhook server is running at http://localhost:${port}`);
+  console.log(`✅ Server running on http://localhost:${port}`);
 });
 
-// ==========================
+// ==============================
 // 🔧 Helper functions below
-// ==========================
+// ==============================
 
 async function sendText(to, text) {
   await axios.post(
@@ -148,44 +140,43 @@ async function sendText(to, text) {
 }
 
 async function sendCatalog(to) {
-  const responseMsg = 
+  const msg = 
 `Welcome to Mochitochi Laundry Services! 🧺
 
-Here’s our service menu:
+Here’s our service Menu:
+👕 Shirt – ₹15  
+👖 Pants – ₹20  
+👗 Saree – ₹100  
+🧥 Suit – ₹250
 
-👕 Shirts – ₹15/piece  
-👖 Pants – ₹20/piece  
-👗 Sarees – ₹100/piece  
-🧥 Suits – ₹250/set
-
-🛒 To order, reply with item and quantity like:
+Reply like:
 "Shirt x 2"
 "Suit x 1"
-Type "done" when you're finished.`;
+Type "done" when ready.`;
 
-  await sendText(to, responseMsg);
+  await sendText(to, msg);
 }
 
 function parseItem(input) {
   const match = input.match(/(.+?)\s*x\s*(\d+)/i);
   if (!match) return null;
   const name = match[1].trim();
-  const qty = parseInt(match[2], 10);
+  const qty = parseInt(match[2]);
   const prices = {
     shirt: 15,
     pants: 20,
     saree: 100,
     suit: 250
   };
-  const lowerName = name.toLowerCase();
-  const priceKey = Object.keys(prices).find(k => lowerName.includes(k));
-  const price = prices[priceKey];
+  const key = Object.keys(prices).find(k => name.toLowerCase().includes(k));
+  const price = prices[key];
   return price ? { name, qty, price } : null;
 }
 
 async function sendOrderSummary(to, session) {
   const { cart, userInfo } = session;
   let total = 0;
+
   const items = cart.map(item => {
     const cost = item.qty * item.price;
     total += cost;
@@ -205,4 +196,5 @@ Total: ₹${total}
 
   await sendText(to, summary);
 }
+
 
