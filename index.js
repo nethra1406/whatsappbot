@@ -2,11 +2,10 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
-const { saveOrder } = require('./db'); // <-- MongoDB helper
+const { saveOrder } = require('./db');
 
 const app = express();
 const port = process.env.PORT || 10000;
-
 app.use(bodyParser.json());
 
 const sessions = {}; // In-memory session store
@@ -56,6 +55,10 @@ app.post('/webhook', async (req, res) => {
 
       case 'ordering':
         if (msgBody.toLowerCase() === 'done') {
+          if (session.cart.length === 0) {
+            await sendText(from, '🛒 Your cart is empty! Add items before proceeding.');
+            return res.sendStatus(200);
+          }
           await sendText(from, '📝 Please provide your full name:');
           session.step = 'get_name';
         } else {
@@ -90,6 +93,18 @@ app.post('/webhook', async (req, res) => {
 
       case 'confirm_order':
         if (msgBody.toLowerCase() === 'place order') {
+          // ✅ Validate before saving
+          if (
+            !session.cart.length ||
+            !session.userInfo.name ||
+            !session.userInfo.address ||
+            !session.userInfo.payment
+          ) {
+            await sendText(from, '⚠️ Incomplete order. Please restart.');
+            delete sessions[from];
+            return res.sendStatus(200);
+          }
+
           await saveOrder({ phone: from, ...session }); // 🧠 Save to DB
           await sendText(from, '🎉 Order placed! Thank you!');
           console.log('🧾 Order saved:', session);
@@ -140,7 +155,7 @@ async function sendText(to, text) {
 }
 
 async function sendCatalog(to) {
-  const msg = 
+  const msg =
 `Welcome to Mochitochi Laundry Services! 🧺
 
 Here’s our service Menu:
@@ -183,7 +198,7 @@ async function sendOrderSummary(to, session) {
     return `• ${item.name} x ${item.qty} = ₹${cost}`;
   }).join('\n');
 
-  const summary = 
+  const summary =
 `🧾 Order Summary:
 ${items}
 ————————————
@@ -196,5 +211,3 @@ Total: ₹${total}
 
   await sendText(to, summary);
 }
-
-
