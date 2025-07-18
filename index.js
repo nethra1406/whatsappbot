@@ -9,6 +9,7 @@ const port = process.env.PORT || 10000;
 app.use(bodyParser.json());
 
 const sessions = {}; // In-memory session store
+const userOrderStatus = {}; // ✅ Tracks if order was already placed
 
 const verifiedNumbers = [
   '919916814517',
@@ -42,6 +43,12 @@ app.post('/webhook', async (req, res) => {
 
     if (!verifiedNumbers.includes(from)) {
       await sendText(from, '⚠️ Sorry, this service is only for verified users.');
+      return res.sendStatus(200);
+    }
+
+    // ✅ Prevent repeat confirmation messages
+    if (userOrderStatus[from] === 'placed' && msgBody.toLowerCase() === 'place order') {
+      await sendText(from, '✅ You already placed the order. Thank you!');
       return res.sendStatus(200);
     }
 
@@ -93,7 +100,6 @@ app.post('/webhook', async (req, res) => {
 
       case 'confirm_order':
         if (msgBody.toLowerCase() === 'place order') {
-          // ✅ Validate before saving
           if (
             !session.cart.length ||
             !session.userInfo.name ||
@@ -105,12 +111,21 @@ app.post('/webhook', async (req, res) => {
             return res.sendStatus(200);
           }
 
-          await saveOrder({ phone: from, ...session }); // 🧠 Save to DB
+          await saveOrder({ phone: from, ...session });
           await sendText(from, '🎉 Order placed! Thank you!');
           console.log('🧾 Order saved:', session);
+
+          userOrderStatus[from] = 'placed'; // ✅ Mark user as placed
+
+          setTimeout(() => {
+            delete userOrderStatus[from]; // ✅ Reset after 10 minutes
+          }, 10 * 60 * 1000);
+
           delete sessions[from];
         } else {
-          await sendText(from, '❓ Type "Place Order" to confirm.');
+          if (userOrderStatus[from] !== 'placed') {
+            await sendText(from, '❓ Type "Place Order" to confirm.');
+          }
         }
         break;
 
