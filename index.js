@@ -2,7 +2,13 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
-const { saveOrder, connectDB, assignVendorToOrder, saveVendor, linkOrderToVendor } = require('./db');
+const {
+  saveOrder,
+  connectDB,
+  assignVendorToOrder,
+  saveVendor,
+  linkOrderToVendor
+} = require('./db');
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -15,22 +21,28 @@ const vendorAssignments = {};
 const pendingOrders = {};
 
 const verifiedNumbers = [
-  '919916814517', // Vendor
-  '917358791933', // Vendor
-  '919444631398', // v
-  '919043331484', // Customer
-  '919710486191'  // Customer
+  '919916814517',
+  '917358791933',
+  '919444631398',
+  '919043331484',
+  '919710486191'
 ];
-const vendors = ['919916814517', '917358791933', '919444631398'];
+const vendors = [
+  '919916814517',
+  '917358791933',
+  '919444631398'
+];
 
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
+
   if (mode === 'subscribe' && token === process.env.VERIFY_TOKEN) {
     console.log('✅ WEBHOOK_VERIFIED');
     return res.status(200).send(challenge);
   }
+
   res.sendStatus(403);
 });
 
@@ -65,11 +77,10 @@ app.post('/webhook', async (req, res) => {
       await saveVendor(from);
       await assignVendorToOrder(orderId, from);
       await linkOrderToVendor(orderId, from);
-
       vendorAssignments[orderId] = from;
 
       await sendText(from, `✅ You accepted order ${orderId}. Proceed with pickup.`);
-      await sendText(orderInfo.customerPhone, `📦 Order ${orderId} is now handled by 📞 ${from}. They will contact you shortly.`);
+      await sendText(orderInfo.customerPhone, `📦 Order ${orderId} is now being handled by 📞 ${from}.`);
 
       delete pendingOrders[orderId];
       return res.sendStatus(200);
@@ -149,7 +160,7 @@ app.post('/webhook', async (req, res) => {
         });
 
         userOrderStatus[from] = 'placed';
-        setTimeout(() => delete userOrderStatus[from], 10 * 60 * 1000); // clear flag in 10 mins
+        setTimeout(() => delete userOrderStatus[from], 10 * 60 * 1000);
 
         await sendText(from, `🎉 Order ${orderId} placed! Finding vendor...`);
         pendingOrders[orderId] = { session, customerPhone: from };
@@ -160,7 +171,6 @@ app.post('/webhook', async (req, res) => {
 
         delete sessions[from];
         break;
-
 
       default:
         session.step = 'catalog';
