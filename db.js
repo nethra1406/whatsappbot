@@ -45,8 +45,32 @@ async function assignVendorToOrder(orderId, vendorPhone) {
   }
 }
 
+// 🔥 NEW FUNCTIONS
+async function saveVendor(vendorPhone) {
+  const db = client.db("whatsappBot");
+  const collection = db.collection("vendors");
+
+  const exists = await collection.findOne({ phone: vendorPhone });
+  if (!exists) {
+    await collection.insertOne({ phone: vendorPhone, assignedOrders: [], createdAt: new Date() });
+    console.log("✅ New vendor added:", vendorPhone);
+  }
+}
+
+async function linkOrderToVendor(orderId, vendorPhone) {
+  const db = client.db("whatsappBot");
+  const collection = db.collection("vendors");
+  await collection.updateOne(
+    { phone: vendorPhone },
+    { $addToSet: { assignedOrders: orderId } }
+  );
+  console.log(`📦 Linked order ${orderId} to vendor ${vendorPhone}`);
+}
+
 module.exports = {
   connectDB,
   saveOrder,
-  assignVendorToOrder
+  assignVendorToOrder,
+  saveVendor,
+  linkOrderToVendor
 };

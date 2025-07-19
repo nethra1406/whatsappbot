@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
-const { saveOrder, connectDB, assignVendorToOrder } = require('./db');
+const { saveOrder, connectDB, assignVendorToOrder, saveVendor, linkOrderToVendor } = require('./db');
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -14,7 +14,6 @@ const userOrderStatus = {};
 const vendorAssignments = {};
 const pendingOrders = {};
 
-// Verified phone numbers
 const verifiedNumbers = [
   '919916814517', // Vendor
   '917358791933', // Vendor
@@ -47,7 +46,6 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // Vendor accepting order
     const acceptMatch = msgBody.toLowerCase().match(/^accept\s+(ord-\d+)/i);
     if (vendors.includes(from) && acceptMatch) {
       const orderId = acceptMatch[1];
@@ -57,22 +55,25 @@ app.post('/webhook', async (req, res) => {
         await sendText(from, '❌ Order not found or already accepted.');
         return res.sendStatus(200);
       }
+
       if (vendorAssignments[orderId]) {
         await sendText(from, '🚫 This order is already assigned.');
         return res.sendStatus(200);
       }
 
+      await saveVendor(from);
+      await assignVendorToOrder(orderId, from);
+      await linkOrderToVendor(orderId, from);
+
       vendorAssignments[orderId] = from;
 
-      await assignVendorToOrder(orderId, from); // store in DB
       await sendText(from, `✅ You accepted order ${orderId}. Proceed with pickup.`);
-      await sendText(orderInfo.customerPhone, `📦 Order ${orderId} is now handled by vendor ${from}.`);
+      await sendText(orderInfo.customerPhone, `📦 Order ${orderId} is now handled by 📞 ${from}. They will contact you shortly.`);
 
       delete pendingOrders[orderId];
       return res.sendStatus(200);
     }
 
-    // Handle normal customer flow
     if (userOrderStatus[from] === 'placed' && msgBody.toLowerCase() === 'place order') {
       await sendText(from, '✅ Order already placed. Please wait.');
       return res.sendStatus(200);
@@ -169,8 +170,6 @@ app.post('/webhook', async (req, res) => {
 app.listen(port, () => {
   console.log(`✅ Server running at http://localhost:${port}`);
 });
-
-// ----------------- HELPERS -----------------
 
 async function sendText(to, text) {
   try {
