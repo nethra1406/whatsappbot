@@ -17,10 +17,11 @@ const pendingOrders = {};
 const verifiedNumbers = [
   '919916814517', // Vendor
   '917358791933', // Vendor
+  '919444631398', // v
   '919043331484', // Customer
   '919710486191'  // Customer
 ];
-const vendors = ['919916814517', '917358791933'];
+const vendors = ['919916814517', '917358791933', '919444631398'];
 
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
