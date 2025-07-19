@@ -126,33 +126,40 @@ app.post('/webhook', async (req, res) => {
         break;
 
       case 'confirm_order':
-        if (msgBody.toLowerCase() === 'place order') {
-          const orderId = `ORD-${Date.now()}`;
-
-          await saveOrder({
-            orderId,
-            customerPhone: from,
-            cart: session.cart,
-            userInfo: session.userInfo,
-            status: 'pending',
-            createdAt: new Date()
-          });
-
-          userOrderStatus[from] = 'placed';
-          setTimeout(() => delete userOrderStatus[from], 10 * 60 * 1000);
-
-          await sendText(from, `🎉 Order ${orderId} placed! Finding vendor...`);
-          pendingOrders[orderId] = { session, customerPhone: from };
-
-          for (const vendor of vendors) {
-            await sendFullOrderToVendor(vendor, orderId, from, session);
-          }
-
-          delete sessions[from];
-        } else {
-          await sendText(from, '❓ Type "Place Order" to confirm.');
+        if (userOrderStatus[from] === 'placed') {
+          await sendText(from, '✅ Order already placed. Please wait.');
+          return res.sendStatus(200);
         }
+
+        if (msgBody.toLowerCase() !== 'place order') {
+          await sendText(from, '❓ Type "Place Order" to confirm.');
+          return res.sendStatus(200);
+        }
+
+        const orderId = `ORD-${Date.now()}`;
+
+        await saveOrder({
+          orderId,
+          customerPhone: from,
+          cart: session.cart,
+          userInfo: session.userInfo,
+          status: 'pending',
+          createdAt: new Date()
+        });
+
+        userOrderStatus[from] = 'placed';
+        setTimeout(() => delete userOrderStatus[from], 10 * 60 * 1000); // clear flag in 10 mins
+
+        await sendText(from, `🎉 Order ${orderId} placed! Finding vendor...`);
+        pendingOrders[orderId] = { session, customerPhone: from };
+
+        for (const vendor of vendors) {
+          await sendFullOrderToVendor(vendor, orderId, from, session);
+        }
+
+        delete sessions[from];
         break;
+
 
       default:
         session.step = 'catalog';
