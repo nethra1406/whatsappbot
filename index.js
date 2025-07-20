@@ -1,3 +1,4 @@
+// File: index.js
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
@@ -12,7 +13,6 @@ const {
 
 const app = express();
 const port = process.env.PORT || 10000;
-
 app.use(bodyParser.json());
 
 const sessions = {};
@@ -42,7 +42,6 @@ app.get('/webhook', (req, res) => {
     console.log('✅ WEBHOOK_VERIFIED');
     return res.status(200).send(challenge);
   }
-
   res.sendStatus(403);
 });
 
@@ -138,18 +137,12 @@ app.post('/webhook', async (req, res) => {
         break;
 
       case 'confirm_order':
-        if (userOrderStatus[from] === 'placed') {
-          await sendText(from, '✅ Order already placed. Please wait.');
-          return res.sendStatus(200);
-        }
-
         if (msgBody.toLowerCase() !== 'place order') {
           await sendText(from, '❓ Type "Place Order" to confirm.');
           return res.sendStatus(200);
         }
 
         const orderId = `ORD-${Date.now()}`;
-
         await saveOrder({
           orderId,
           customerPhone: from,
