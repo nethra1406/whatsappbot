@@ -1,144 +1,277 @@
+// File: index.js
+require('dotenv').config();
 const express = require('express');
-const bodyParser = require('body-parser');
 const axios = require('axios');
-
-// Import your database functions from db.js
-const { 
-  saveOrder, 
-  assignVendorToOrder, 
-  saveVendor, 
-  linkOrderToVendor 
-} = require('./db.js');
+const bodyParser = require('body-parser');
+const {
+  saveOrder,
+  connectDB,
+  assignVendorToOrder,
+  saveVendor,
+  linkOrderToVendor
+} = require('./db');
 
 const app = express();
+const port = process.env.PORT || 10000;
 app.use(bodyParser.json());
 
-// --- ⚙ CONFIGURATION ---
-// Replace these with your actual credentials from the Meta App Dashboard
-const PORT = process.env.PORT || 3000;
-const VERIFY_TOKEN = "YOUR_SECRET_VERIFY_TOKEN"; 
-const WHATSAPP_TOKEN = "YOUR_TEMPORARY_OR_PERMANENT_ACCESS_TOKEN";
-const PHONE_NUMBER_ID = "YOUR_PHONE_NUMBER_ID";
+const sessions = {};
+const userOrderStatus = {};
+const vendorAssignments = {};
+const pendingOrders = {};
 
-// A list of phone numbers for your vendors/staff.
-// Use the international format without '+' or spaces (e.g., "919876543210")
-const VENDOR_NUMBERS = ["91xxxxxxxxxx", "91yyyyyyyyyy"]; 
+const verifiedNumbers = [
+  '919916814517',
+  '917358791933',
+  '919444631398',
+  '919043331484',
+  '919710486191'
+];
+const vendors = [
+  '919916814517',
+  '917358791933',
+  '919444631398'
+];
 
-// --- STATE MANAGEMENT ---
-// A simple object to track where each user is in a conversation.
-let userState = {};
-
-// --- WEBHOOK ENDPOINTS ---
-
-// This endpoint is used by Meta to verify your webhook.
+// ✅ Webhook Verification
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode && token === VERIFY_TOKEN) {
-    if (mode === 'subscribe') {
-      console.log('✅ Webhook verified');
-      res.status(200).send(challenge);
-    } else {
-      res.sendStatus(403);
-    }
-  } else {
-    res.sendStatus(403);
+  if (mode === 'subscribe' && token === process.env.VERIFY_TOKEN) {
+    console.log('✅ WEBHOOK_VERIFIED');
+    return res.status(200).send(challenge);
   }
+  res.sendStatus(403);
 });
 
-// This is the main endpoint that receives all incoming messages.
+// ✅ Webhook POST handler
 app.post('/webhook', async (req, res) => {
-  const body = req.body;
-
-  // Ensure the request is a valid WhatsApp message notification
-  if (!body.object || !body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
-    return res.sendStatus(200); // Not a message, but acknowledge receipt
-  }
-
-  const messageData = body.entry[0].changes[0].value.messages[0];
-  const from = messageData.from; // User's phone number
-  const msg_body = messageData.text.body.trim();
-
-  // Helper function to send a reply back to the user
-  const sendReply = (text) => {
-    axios.post(
-      `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to: from,
-        text: { body: text },
-      },
-      { headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` } }
-    ).catch(error => console.error("Error sending reply:", error.response?.data));
-  };
-
   try {
-    const isVendor = VENDOR_NUMBERS.includes(from);
+    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    if (!message) return res.sendStatus(404);
 
-    // --- VENDOR LOGIC ---
-    if (isVendor) {
-      const [command, orderId] = msg_body.split(" ");
-      if (command.toLowerCase() === 'assign' && orderId) {
-        await saveVendor(from);
-        await assignVendorToOrder(orderId, from);
-        await linkOrderToVendor(orderId, from);
-        sendReply(`✅ Order *${orderId}* has been assigned to you.`);
-      } else {
-        sendReply("Hello Vendor! To assign an order, please send:\n`assign <OrderID>`");
+    const from = message.from;
+    const msgBody = message.text?.body?.trim();
+
+    if (!verifiedNumbers.includes(from)) {
+      await sendText(from, '⚠ Access restricted to verified users.');
+      return res.sendStatus(200);
+    }
+
+    const acceptMatch = msgBody.toLowerCase().match(/^accept\s+(ord-\d+)/i);
+    if (vendors.includes(from) && acceptMatch) {
+      const orderId = acceptMatch[1];
+      const orderInfo = pendingOrders[orderId];
+
+      if (!orderInfo) {
+        await sendText(from, '❌ Order not found or already accepted.');
+        return res.sendStatus(200);
       }
-    } 
-    // --- CUSTOMER LOGIC ---
-    else {
-      const currentState = userState[from]?.action;
-      
-      if (currentState === 'awaiting_address') {
-        const orderId = `LNDRY${Date.now()}`;
+
+      if (vendorAssignments[orderId]) {
+        await sendText(from, '🚫 This order is already assigned.');
+        return res.sendStatus(200);
+      }
+
+      await saveVendor(from);
+      await assignVendorToOrder(orderId, from);
+      await linkOrderToVendor(orderId, from);
+      vendorAssignments[orderId] = from;
+
+      await sendText(from, `✅ You accepted order ${orderId}. Proceed with pickup.`);
+      await sendText(orderInfo.customerPhone, `📦 Order ${orderId} is now being handled by 📞 ${from}.`);
+
+      delete pendingOrders[orderId];
+      return res.sendStatus(200);
+    }
+
+    if (userOrderStatus[from] === 'placed' && msgBody.toLowerCase() === 'place order') {
+      await sendText(from, '✅ Order already placed. Please wait.');
+      return res.sendStatus(200);
+    }
+
+    const session = sessions[from] || { step: 'catalog', cart: [], userInfo: {} };
+
+    switch (session.step) {
+      case 'catalog':
+        await sendCatalog(from);
+        session.step = 'ordering';
+        break;
+
+      case 'ordering':
+        if (msgBody.toLowerCase() === 'done') {
+          if (!session.cart.length) {
+            await sendText(from, '🛒 Cart is empty!');
+          } else {
+            session.step = 'get_name';
+            await sendText(from, '👤 Enter your full name:');
+          }
+        } else {
+          const item = parseItem(msgBody);
+          if (item) {
+            session.cart.push(item);
+            await sendText(from, `✅ Added: ${item.name} x ${item.qty}`);
+            await sendText(from, '🛒 Add more or type "done"');
+          } else {
+            await sendText(from, '⚠ Format: "Shirt x 2"');
+          }
+        }
+        break;
+
+      case 'get_name':
+        session.userInfo.name = msgBody;
+        session.step = 'get_address';
+        await sendText(from, '📍 Enter delivery address:');
+        break;
+
+      case 'get_address':
+        session.userInfo.address = msgBody;
+        session.step = 'get_payment';
+        await sendText(from, '💳 Payment method: Cash / UPI / Card');
+        break;
+
+      case 'get_payment':
+        session.userInfo.payment = msgBody;
+        session.step = 'confirm_order';
+        await sendOrderSummary(from, session);
+        break;
+
+      case 'confirm_order':
+        if (msgBody.toLowerCase() !== 'place order') {
+          await sendText(from, '❓ Type "Place Order" to confirm.');
+          return res.sendStatus(200);
+        }
+
+        const orderId = `ORD-${Date.now()}`;
         await saveOrder({
           orderId,
           customerPhone: from,
-          address: msg_body,
-          status: 'new',
-          createdAt: new Date(),
+          cart: session.cart,
+          userInfo: session.userInfo,
+          status: 'pending',
+          createdAt: new Date()
         });
-        sendReply(`Thank you! Your pickup is scheduled.\n\nYour Order ID is: *${orderId}*\n\nPlease use this ID to check the status of your order.`);
-        delete userState[from]; // Reset state after completion
-      } 
-      else if (msg_body.toLowerCase().startsWith('status')) {
-        const parts = msg_body.split(" ");
-        if (parts.length > 1) {
-          const orderId = parts[1];
-          // You would add a function in db.js to find the order and return its status
-          sendReply(`Checking status for Order *${orderId}*... (feature coming soon)`);
-        } else {
-          sendReply('To check your order status, please send:\n`status <OrderID>`');
+
+        userOrderStatus[from] = 'placed';
+        setTimeout(() => delete userOrderStatus[from], 10 * 60 * 1000); // Reset after 10 mins
+
+        await sendText(from, `🎉 Order ${orderId} placed! Finding vendor...`);
+        pendingOrders[orderId] = { session, customerPhone: from };
+
+        for (const vendor of vendors) {
+          await sendFullOrderToVendor(vendor, orderId, from, session);
         }
-      }
-      else {
-        switch (msg_body.toLowerCase()) {
-          case 'pickup':
-            userState[from] = { action: 'awaiting_address' };
-            sendReply('Of course! Please reply with your full address for the pickup.');
-            break;
-          case 'services':
-            sendReply('Our Services:\n\n- Wash & Fold: ₹500 per 5kg\n- Dry Cleaning: Starts at ₹150 per item\n- Ironing: ₹20 per item');
-            break;
-          default:
-            sendReply("👋 Welcome to LaundryBot! How can I help you today?\n\n- Type pickup to schedule a pickup.\n- Type services to see our price list.\n- Type status <OrderID> to check your order.");
-            break;
-        }
-      }
+
+        delete sessions[from];
+        break;
+
+      default:
+        session.step = 'catalog';
+        await sendText(from, '🤖 Type anything to start ordering.');
     }
-  } catch (error) {
-    console.error("Error processing message:", error);
-    sendReply("Sorry, an error occurred. Please try again.");
+
+    sessions[from] = session;
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('❌ Error:', err.message || err);
+    res.sendStatus(500);
   }
-
-  res.sendStatus(200);
 });
 
-// Start the server
-app.listen(PORT, () => {
-  console.log(`🚀 Server is live and listening on port ${PORT}`);
+app.listen(port, () => {
+  console.log(`✅ Server running at http://localhost:${port}`);
 });
+
+// =======================
+// 🔧 Utility Functions
+// =======================
+
+async function sendText(to, text) {
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        to,
+        text: { body: text }
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+  } catch (err) {
+    console.error('❌ sendText failed:', err.response?.data || err.message);
+  }
+}
+
+async function sendCatalog(to) {
+  const msg = `🧺 Mochitochi Laundry Menu:
+
+👕 Shirt – ₹15  
+👖 Pants – ₹20  
+👗 Saree – ₹100  
+🧥 Suit – ₹250
+
+Reply like: "Shirt x 2"
+Type "done" when finished.`;
+  await sendText(to, msg);
+}
+
+function parseItem(input) {
+  const match = input.match(/(.+?)\s*x\s*(\d+)/i);
+  if (!match) return null;
+  const name = match[1].trim();
+  const qty = parseInt(match[2]);
+  const prices = { shirt: 15, pants: 20, saree: 100, suit: 250 };
+  const key = Object.keys(prices).find(k => name.toLowerCase().includes(k));
+  const price = prices[key];
+  return price ? { name, qty, price } : null;
+}
+
+async function sendOrderSummary(to, session) {
+  const { cart, userInfo } = session;
+  let total = 0;
+  const items = cart.map(item => {
+    const cost = item.qty * item.price;
+    total += cost;
+    return `• ${item.name} x ${item.qty} = ₹${cost}`;
+  }).join('\n');
+
+  const summary = `🧾 Order Summary:
+${items}
+————————————
+👤 Name: ${userInfo.name}
+🏠 Address: ${userInfo.address}
+💳 Payment: ${userInfo.payment}
+💰 Total: ₹${total}
+
+✅ Type "Place Order" to confirm.`;
+
+  await sendText(to, summary);
+}
+
+async function sendFullOrderToVendor(vendor, orderId, customerPhone, session) {
+  const { userInfo, cart } = session;
+  const items = cart.map(i => `- ${i.name} x ${i.qty} = ₹${i.qty * i.price}`).join('\n');
+  const total = cart.reduce((sum, i) => sum + i.qty * i.price, 0);
+
+  const fullMsg = `📢 New Order
+🆔 Order ID: ${orderId}
+📞 Customer: ${customerPhone}
+👤 Name: ${userInfo.name}
+🏠 Address: ${userInfo.address}
+💳 Payment: ${userInfo.payment}
+
+🧺 Items:
+${items}
+💰 Total: ₹${total}
+
+Reply: ACCEPT ${orderId}`;
+
+  await sendText(vendor, fullMsg);
+}
