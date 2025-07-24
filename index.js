@@ -28,7 +28,7 @@ const verifiedNumbers = [
   '919710486191'
 ];
 const vendors = [
-  '919043831484'
+  '919043331484'
 ];
 
 // ✅ Webhook Verification
