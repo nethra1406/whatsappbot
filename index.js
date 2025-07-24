@@ -8,7 +8,8 @@ const {
   connectDB,
   assignVendorToOrder,
   saveVendor,
-  linkOrderToVendor
+  linkOrderToVendor,
+  getOrderById
 } = require('./db');
 
 const app = express();
@@ -17,16 +18,13 @@ app.use(bodyParser.json());
 
 const sessions = {};
 const userOrderStatus = {};
-
+const vendors = ['919043331484'];
 const verifiedNumbers = [
   '919916814517',
   '917358791933',
   '919444631398',
   '919043331484',
   '919710486191'
-];
-const vendors = [
-  '919043331484'
 ];
 
 // ✅ Webhook Verification
@@ -56,16 +54,14 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
+    // ✅ Vendor accepts order
     const acceptMatch = msgBody.toLowerCase().match(/^accept\s+(ord-\d+)/i);
     if (vendors.includes(from) && acceptMatch) {
       const orderId = acceptMatch[1];
+      const order = await getOrderById(orderId);
 
-      const db = await connectDB();
-      const collection = db.collection('orders');
-      const orderInfo = await collection.findOne({ orderId });
-
-      if (!orderInfo || orderInfo.status !== 'pending') {
-        await sendText(from, '❌ Order not found or already accepted.');
+      if (!order) {
+        await sendText(from, '❌ Order not found in database.');
         return res.sendStatus(200);
       }
 
@@ -74,7 +70,7 @@ app.post('/webhook', async (req, res) => {
       await linkOrderToVendor(orderId, from);
 
       await sendText(from, `✅ You accepted order ${orderId}. Proceed with pickup.`);
-      await sendText(orderInfo.customerPhone, `📦 Order ${orderId} is now being handled by 📞 ${from}.`);
+      await sendText(order.customerPhone, `📦 Order ${orderId} is now being handled by 📞 ${from}.`);
       return res.sendStatus(200);
     }
 
@@ -136,16 +132,15 @@ app.post('/webhook', async (req, res) => {
         }
 
         const orderId = `ORD-${Date.now()}`;
-        const orderData = {
+        await saveOrder({
           orderId,
           customerPhone: from,
           cart: session.cart,
           userInfo: session.userInfo,
           status: 'pending',
           createdAt: new Date()
-        };
+        });
 
-        await saveOrder(orderData);
         userOrderStatus[from] = 'placed';
         setTimeout(() => delete userOrderStatus[from], 10 * 60 * 1000);
 

@@ -20,7 +20,7 @@ async function connectDB() {
   if (cachedDB) return cachedDB;
   await client.connect();
   console.log("✅ Connected to MongoDB");
-  cachedDB = client.db("whatsappBot"); // ✅ return full db, not collection
+  cachedDB = client.db("whatsappBot");
   return cachedDB;
 }
 
@@ -75,16 +75,17 @@ async function linkOrderToVendor(orderId, vendorPhone) {
   console.log(`🔗 Linked order ${orderId} to vendor ${vendorPhone}`);
 }
 
+async function getOrderById(orderId) {
+  const db = await connectDB();
+  const collection = db.collection("orders");
+  return await collection.findOne({ orderId });
+}
+
 module.exports = {
   connectDB,
   saveOrder,
   assignVendorToOrder,
   saveVendor,
-  linkOrderToVendor
+  linkOrderToVendor,
+  getOrderById
 };
-
-
-
-
-
-
