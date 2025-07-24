@@ -17,8 +17,6 @@ app.use(bodyParser.json());
 
 const sessions = {};
 const userOrderStatus = {};
-const vendorAssignments = {};
-const pendingOrders = {};
 
 const verifiedNumbers = [
   '919916814517',
@@ -61,27 +59,22 @@ app.post('/webhook', async (req, res) => {
     const acceptMatch = msgBody.toLowerCase().match(/^accept\s+(ord-\d+)/i);
     if (vendors.includes(from) && acceptMatch) {
       const orderId = acceptMatch[1];
-      const orderInfo = pendingOrders[orderId];
 
-      if (!orderInfo) {
+      const db = await connectDB();
+      const collection = db.collection('orders');
+      const orderInfo = await collection.findOne({ orderId });
+
+      if (!orderInfo || orderInfo.status !== 'pending') {
         await sendText(from, '❌ Order not found or already accepted.');
-        return res.sendStatus(200);
-      }
-
-      if (vendorAssignments[orderId]) {
-        await sendText(from, '🚫 This order is already assigned.');
         return res.sendStatus(200);
       }
 
       await saveVendor(from);
       await assignVendorToOrder(orderId, from);
       await linkOrderToVendor(orderId, from);
-      vendorAssignments[orderId] = from;
 
       await sendText(from, `✅ You accepted order ${orderId}. Proceed with pickup.`);
       await sendText(orderInfo.customerPhone, `📦 Order ${orderId} is now being handled by 📞 ${from}.`);
-
-      delete pendingOrders[orderId];
       return res.sendStatus(200);
     }
 
@@ -143,20 +136,20 @@ app.post('/webhook', async (req, res) => {
         }
 
         const orderId = `ORD-${Date.now()}`;
-        await saveOrder({
+        const orderData = {
           orderId,
           customerPhone: from,
           cart: session.cart,
           userInfo: session.userInfo,
           status: 'pending',
           createdAt: new Date()
-        });
+        };
 
+        await saveOrder(orderData);
         userOrderStatus[from] = 'placed';
-        setTimeout(() => delete userOrderStatus[from], 10 * 60 * 1000); // Reset after 10 mins
+        setTimeout(() => delete userOrderStatus[from], 10 * 60 * 1000);
 
         await sendText(from, `🎉 Order ${orderId} placed! Finding vendor...`);
-        pendingOrders[orderId] = { session, customerPhone: from };
 
         for (const vendor of vendors) {
           await sendFullOrderToVendor(vendor, orderId, from, session);
@@ -188,7 +181,7 @@ app.listen(port, () => {
 
 async function sendText(to, text) {
   try {
-    const response = await axios.post(
+    await axios.post(
       `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
       {
         messaging_product: 'whatsapp',
@@ -207,7 +200,6 @@ async function sendText(to, text) {
     console.error(`❌ Failed to send to ${to}:`, err.response?.data || err.message);
   }
 }
-
 
 async function sendCatalog(to) {
   const msg = `🧺 Mochitochi Laundry Menu:
