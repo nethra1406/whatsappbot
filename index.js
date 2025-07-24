@@ -58,10 +58,15 @@ app.post('/webhook', async (req, res) => {
     const acceptMatch = msgBody.toLowerCase().match(/^accept\s+(ord-\d+)/i);
     if (vendors.includes(from) && acceptMatch) {
       const orderId = acceptMatch[1];
-      const order = await getOrderById(orderId);
+      const order = await getOrderById(orderId); // DB lookup instead of memory
 
       if (!order) {
         await sendText(from, '❌ Order not found in database.');
+        return res.sendStatus(200);
+      }
+
+      if (order.status === 'assigned') {
+        await sendText(from, '🚫 This order is already assigned.');
         return res.sendStatus(200);
       }
 

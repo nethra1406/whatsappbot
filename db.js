@@ -1,3 +1,4 @@
+// db
 require('dotenv').config();
 const { MongoClient, ServerApiVersion } = require("mongodb");
 
@@ -16,6 +17,7 @@ const client = new MongoClient(uri, {
 
 let cachedDB = null;
 
+// ✅ Connect and cache the database instance
 async function connectDB() {
   if (cachedDB) return cachedDB;
   await client.connect();
@@ -24,6 +26,7 @@ async function connectDB() {
   return cachedDB;
 }
 
+// ✅ Save a new order
 async function saveOrder(orderData) {
   const db = await connectDB();
   const collection = db.collection("orders");
@@ -31,9 +34,11 @@ async function saveOrder(orderData) {
   console.log("📦 Order saved");
 }
 
+// ✅ Assign a vendor to an order
 async function assignVendorToOrder(orderId, vendorPhone) {
   const db = await connectDB();
   const collection = db.collection("orders");
+
   const result = await collection.updateOne(
     { orderId },
     {
@@ -44,6 +49,7 @@ async function assignVendorToOrder(orderId, vendorPhone) {
       }
     }
   );
+
   if (result.modifiedCount) {
     console.log(`✅ Vendor assigned to ${orderId}`);
   } else {
@@ -51,9 +57,11 @@ async function assignVendorToOrder(orderId, vendorPhone) {
   }
 }
 
+// ✅ Save vendor info if not already exists
 async function saveVendor(vendorPhone) {
   const db = await connectDB();
   const collection = db.collection("vendors");
+
   const exists = await collection.findOne({ phone: vendorPhone });
   if (!exists) {
     await collection.insertOne({
@@ -65,9 +73,11 @@ async function saveVendor(vendorPhone) {
   }
 }
 
+// ✅ Link order ID to a vendor’s assigned orders list
 async function linkOrderToVendor(orderId, vendorPhone) {
   const db = await connectDB();
   const collection = db.collection("vendors");
+
   await collection.updateOne(
     { phone: vendorPhone },
     { $addToSet: { assignedOrders: orderId } }
@@ -75,6 +85,7 @@ async function linkOrderToVendor(orderId, vendorPhone) {
   console.log(`🔗 Linked order ${orderId} to vendor ${vendorPhone}`);
 }
 
+// ✅ Retrieve an order by orderId
 async function getOrderById(orderId) {
   const db = await connectDB();
   const collection = db.collection("orders");
