@@ -55,13 +55,28 @@ app.post('/webhook', async (req, res) => {
     }
 
     // ✅ Vendor accepts order
-    const acceptMatch = msgBody.toLowerCase().match(/^accept\s+(ord-\d+)/i);
+    const acceptMatch = msgBody.toLowerCase().match(/^accept\s+(ord-\d+|\d{3,})$/i);
     if (vendors.includes(from) && acceptMatch) {
-      const orderId = acceptMatch[1];
-      const order = await getOrderById(orderId); // DB lookup instead of memory
+      const code = acceptMatch[1].toUpperCase();
+      const db = await connectDB();
+      const ordersCollection = db.collection("orders");
+
+      let order = null;
+
+      if (code.startsWith("ORD-")) {
+        order = await ordersCollection.findOne({ orderId: code });
+      } else {
+        // Try to match by last 3+ digits
+        const allPending = await ordersCollection
+          .find({ status: "pending" })
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        order = allPending.find(o => o.orderId.endsWith(code));
+      }
 
       if (!order) {
-        await sendText(from, '❌ Order not found in database.');
+        await sendText(from, `❌ No order found matching "${code}".`);
         return res.sendStatus(200);
       }
 
@@ -69,6 +84,8 @@ app.post('/webhook', async (req, res) => {
         await sendText(from, '🚫 This order is already assigned.');
         return res.sendStatus(200);
       }
+
+      const orderId = order.orderId;
 
       await saveVendor(from);
       await assignVendorToOrder(orderId, from);
@@ -79,6 +96,7 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
+    // 🧺 Order flow starts here
     if (userOrderStatus[from] === 'placed' && msgBody.toLowerCase() === 'place order') {
       await sendText(from, '✅ Order already placed. Please wait.');
       return res.sendStatus(200);
