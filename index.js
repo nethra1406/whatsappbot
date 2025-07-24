@@ -190,7 +190,7 @@ app.listen(port, () => {
 
 async function sendText(to, text) {
   try {
-    await axios.post(
+    const response = await axios.post(
       `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
       {
         messaging_product: 'whatsapp',
@@ -204,10 +204,12 @@ async function sendText(to, text) {
         }
       }
     );
+    console.log(`✅ Message sent to ${to}: ${text}`);
   } catch (err) {
-    console.error('❌ sendText failed:', err.response?.data || err.message);
+    console.error(`❌ Failed to send to ${to}:`, err.response?.data || err.message);
   }
 }
+
 
 async function sendCatalog(to) {
   const msg = `🧺 Mochitochi Laundry Menu:
