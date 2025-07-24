@@ -1,10 +1,7 @@
-require('dotenv').config(); // ← Loads .env variables
-
+require('dotenv').config();
 const { MongoClient, ServerApiVersion } = require("mongodb");
 
-// 🔐 Use environment variable instead of hardcoding
 const uri = process.env.MONGODB_URI;
-
 if (!uri) {
   throw new Error("❌ MONGODB_URI is not defined in your .env file");
 }
@@ -17,25 +14,26 @@ const client = new MongoClient(uri, {
   },
 });
 
-let cachedCollection = null;
+let cachedDB = null;
 
 async function connectDB() {
-  if (cachedCollection) return cachedCollection;
+  if (cachedDB) return cachedDB;
   await client.connect();
   console.log("✅ Connected to MongoDB");
-  const db = client.db("whatsappBot");
-  cachedCollection = db.collection("orders");
-  return cachedCollection;
+  cachedDB = client.db("whatsappBot"); // ✅ return full db, not collection
+  return cachedDB;
 }
 
 async function saveOrder(orderData) {
-  const collection = await connectDB();
+  const db = await connectDB();
+  const collection = db.collection("orders");
   await collection.insertOne(orderData);
   console.log("📦 Order saved");
 }
 
 async function assignVendorToOrder(orderId, vendorPhone) {
-  const collection = await connectDB();
+  const db = await connectDB();
+  const collection = db.collection("orders");
   const result = await collection.updateOne(
     { orderId },
     {
@@ -54,9 +52,8 @@ async function assignVendorToOrder(orderId, vendorPhone) {
 }
 
 async function saveVendor(vendorPhone) {
-  const db = client.db("whatsappBot");
+  const db = await connectDB();
   const collection = db.collection("vendors");
-
   const exists = await collection.findOne({ phone: vendorPhone });
   if (!exists) {
     await collection.insertOne({
@@ -69,9 +66,8 @@ async function saveVendor(vendorPhone) {
 }
 
 async function linkOrderToVendor(orderId, vendorPhone) {
-  const db = client.db("whatsappBot");
+  const db = await connectDB();
   const collection = db.collection("vendors");
-
   await collection.updateOne(
     { phone: vendorPhone },
     { $addToSet: { assignedOrders: orderId } }
@@ -86,5 +82,9 @@ module.exports = {
   saveVendor,
   linkOrderToVendor
 };
+
+
+
+
 
 
